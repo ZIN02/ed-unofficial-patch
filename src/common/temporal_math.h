@@ -560,6 +560,21 @@ inline void temporalCameraGateAdvance(TemporalCameraGate& g, bool rowsKept) {
     g.parked = false;
 }
 
+// On a canted headset the pass re-bases an accepted delta to the treating
+// eye (temporalCantedWorldFromSelected) AFTER the gate stored it, so the
+// gate's last-good is in the source eye's basis while the frame used the
+// converted one -- and a later carry would replay the conjugation the world
+// was never reprojected with. The pass calls this with the delta it used;
+// the store mirrors the step's own rules: the rotation always, the
+// translation only when the frame was not a jump (a jump's frame keeps the
+// translation before it as the last good).
+inline void temporalCameraGateStoreUsed(TemporalCameraGate& g, bool jump,
+                                        const float W[9], const float tv[3]) {
+    if (!g.lastGoodValid) return;
+    memcpy(g.lastGoodC, W, sizeof(g.lastGoodC));
+    if (!jump) memcpy(g.lastGoodTv, tv, sizeof(g.lastGoodTv));
+}
+
 // The whole reprojection for one pixel, as the shader does it: the pixel's
 // direction through this frame's frustum, rotated into last frame's view,
 // projected through last frame's frustum. False when it lands behind the

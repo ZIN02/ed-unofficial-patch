@@ -3,7 +3,7 @@
 ## Status
 
 *Restates the journal below; not new evidence -- update it whenever
-this doc changes. Last updated 2026-10-09 for the DLSS ceiling.*
+this doc changes. Last updated 2026-11-14 for the AA review fixes.*
 
 - **State:** TAA/DLSS carries UI/smoke depth and station motion by
   default ("Current defaults", 2026-09-10). Feature A (the supersample
@@ -18,7 +18,7 @@ this doc changes. Last updated 2026-10-09 for the DLSS ceiling.*
   floor (twice the input; the runtime upsamples the rest) -- BUILT, NOT
   FLOWN ("The served floor", at the end). 2026-10-09: NVIDIA's own side
   limit (8192 per axis) cuts the output first -- BUILT, NOT FLOWN ("The
-  ceiling", at the end).
+  ceiling", at the end). 2026-11-14 AA review fixes at the end.
 - **Open:**
   - Flat sharpening (`fix.render_sharpness`, ahead of the game's output
     copy; the UI never is): BUILT 2026-09-29, NOT FLOWN. See its section.
@@ -2430,3 +2430,44 @@ a pixel-count model that the rule must not match; and the mutants in
 **State.** BUILT, NOT FLOWN. The next flight should show one `dlss ceiling:`
 line per output size, a `dlss modes` line for the cap, and the price line
 as DLSS rather than "own history".
+
+## AA review 2026-11-14
+
+A read-only review of the AA and motion paths (temporal pass, jitter
+chain, head/world deltas, engine-record motion, the DLSS MV feed) found
+four candidates; two were fixed, two were not shipped (below).
+
+**Fixed: the canted-headset carry basis.** On a canted headset the pass
+re-bases an accepted world delta to the treating eye
+(`temporalCantedWorldFromSelected`) AFTER `temporalCameraGateStep` stored
+the source eye's delta as the last good, so a later refused frame carried
+the un-converted conjugation -- one frame of world misregistration up to
+the cant angle, reachable exactly when the rows' delta exceeds 3 degrees
+from the head's, i.e. under fast ship turns. The gate now has
+`temporalCameraGateStoreUsed` (src/common/temporal_math.h), which the
+pass calls with the delta it used; `tools/temporal_test` pins both
+sequences: without the store a carry replays the raw source-eye delta
+(demonstrated failing on the unfixed code), with it the converted one.
+BUILT, NOT FLOWN.
+
+**Fixed: the light-grid jitter probe.** `native_temporal.cpp`'s begin()
+loop leaves eye 1's (jx, jy) in the variables the probe is noted with;
+the probe now gets eye 0's sample. Log-only.
+
+**Not shipped: the mv pass's engine-record jitter term.** The review
+suspected `enginePixelZ`/`holoPixel`'s `+holoJitter.xy - offset` gives
+mv's engine-owned motion vectors an extra current-frame jitter against
+the camera path's MVs in the same texture. Refuted from the repo:
+`tools/holo_motion_test` pins pp's offset-invariance ("the native output
+grid gives the same physical motion"), i.e. the `- offset` term is the
+designed correction, and main's call (offset = jit.xy) is unchanged by
+any such edit. What would settle it in the field is an eye-dump DT trace
+(`decisionPath` 11 vs 1/2 residuals on a grid) on a DLSS flight with the
+head moving; not produced here.
+
+**Not shipped: the suit family's skinRegister.** `01DA82F8`/`2C3ADCD2`
+(2026-11-05) is keyed skinned with the default register 0 while the hair
+family needed 8. `tools/skin_clone_test` K4b proves a pixel-shader
+SV_IsFrontFace clash at the export register is REFUSED, not silently
+wrong, so this cannot corrupt motion; whether ps_2C3ADCD2 reads v7 needs
+the dumped bytecode (analysis repo), which this clone does not have.

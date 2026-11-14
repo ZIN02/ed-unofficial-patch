@@ -4158,6 +4158,10 @@ void* temporalInner(void* srcTex, int eye, const float* bounds,
                                 step.jump, worldDelta, tvCam)) {
                             if (step.jump) ++g_cantedWorldStats.jumpZeroed;
                             memcpy(cand[2], worldDelta, sizeof(worldDelta));
+                            // The gate stored the source eye's delta; the
+                            // frame used the converted one, and a later carry
+                            // must replay the converted basis (temporal_math.h).
+                            temporalCameraGateStoreUsed(g_cameraGate, step.jump, worldDelta, tvCam);
                             ++g_cantedWorldStats.converted;
                             ++g_cantedWorldStats.convertedEye[eye];
                             if (g_rowsChoice.selectedEye == eye)
