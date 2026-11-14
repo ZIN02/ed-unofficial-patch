@@ -31,6 +31,9 @@
   native-marker/bypass interpretation: all five alleged native pairs and BA58
   were EDVR-generated.
 - **2026-11-03 NPCs with no AA (DIAGNOSED; fix BUILT, NOT FLOWN, entry before last):** NPCs whose palette base is >= 65,536 (`kMaxRows`; palette 174,763 rows) never joined (masked, no history); tables now 180,224 rows.
+- **2026-11-12 (#133, BUILT, NOT FLOWN):** the overlay guard now covers the
+  UV-only decal pair vs_5B4D / ps_4375 too (stale-slot ghosting on station and
+  ship detailing); last entry.
 - **Other open work:** walkers (F10, F1, F2 entries at the end); ships, evaluated-but-undrawn movers, flat-source aliasing; stale cockpit (low
   priority); ps_91F8/ps_A607 owner/coverage.
   Flight 5/6 and 162703 cover the fixed on-foot/hangar paths. Boarding flicker:
@@ -49,16 +52,12 @@
   2398. Fix 4118ae84 merged, pushed, remote main verified.
 - **0.19.0 review (10-09):** chain verdict vs shader registry, and history out of
   a mixed-palette frame, FIXED (two end entries, NOT FLOWN).
-- **Next:** rotating-station capture on the installed repair, after clean
-  promotion/deployment is verified by the installer and delivery report.
-  Require hooked primary/copier/merge/clear statuses, nonzero joined private
-  rows/scatter, actual EP/EN ownership exports and correct brace
-  motion/coverage; inspect remaining WORLD and building pixels separately.
-  Visual verification is open. Native primary records stay unchanged; no bones,
-  estimation or generic pool matching. NPC (Explorer Cam, VR): F1, F2 and the
-  one-join-per-frame fix FLOWN OK (F14, 7d0e052e; Sean: "NPCs looked good").
-  F15 (E on the first-person panel) FLOWN OK (050026). F16 priced it: clears
-  0.003-0.005, join 0.03, pose 0.03-0.09 ms. NPC hair: last entry, FLOWN OK.
+- **Next:** rotating-station capture on the installed repair after clean
+  promotion/deployment is verified. Require hooked primary/copier/merge/clear
+  statuses, nonzero joined private rows/scatter, actual EP/EN ownership
+  exports and correct brace motion/coverage; inspect remaining WORLD and
+  building pixels separately. Visual verification is open; native primary
+  records unchanged. NPC (Explorer Cam, VR) F1/F2/F15/F16 and hair: FLOWN OK.
 
 ## Premise
 
@@ -4541,3 +4540,48 @@ The post-rc.5 review suspected the VR overlay guard (776baeee) of a full MRT6 co
 - ruled out: per-draw group copies, because every VR flight since the guard landed reads about one copy per eye-frame. The heaviest window, Epic 062236 06:24:06, has `copies 5320 (173060.5 MB)` in 2,661 frames (2.00 a frame); Frontier 064831 06:49:31 has 1,764; 061437, 063129, 052135, 044624 and 02 191605 agree. The overlay draws are drawn back to back.
 - What is left is one 2016x2017 x 8-byte copy per eye-frame, about 65 MB of read and write traffic, not timed by the census. Estimated 0.05 to 0.15 ms per eye depending on the GPU's bandwidth.
 - Check on a later flight: if `copies` ever exceeds about 2 a frame (`ui quality: layer: 30 s, N frames` gives N), the grouping has broken; the reset before the family filter is where to look.
+## 2026-11-12 (#133): the overlay guard covers the UV-only decal pair too
+
+Issue #133 (open): with DLSS as the AA solution -- and, per the reporter, with
+every temporal method except XeSS-SR (weaker there) -- ghost trails appear on
+specific parts of the station and ship geometry, "like detailing", at a Dodec
+station with the Anaconda Mk II, most notable when moving around. The
+documented mechanism for exactly this symptom is a keyed decal-like draw that
+passes GEQUAL and writes no depth: its MRT6 marker carries SV_Position.z less
+a per-material depth bias, the compose's exact depth test calls the base
+pixel stale (kind 4), and the pixel keeps the camera term -- 18 to 200 px off
+the joined motion under camera motion (run 193124490001, the ship hull; fixed
+for vs_BBE5 / ps_DB3E by the VR overlay guard, 776baeee). The flat census
+names a second such pair, vs_5B4D / ps_4375 (draws 155/157, `17wZ`, mask 1;
+design-flat-temporal-aa-2026-09-23.md: "vs_5B4D has no guard at all"), and
+the family subtracts the same per-material offset from SV_Position.z
+(2026-09-27 entry, the decal-like note). Left unguarded, its draws kept the
+same stale slots on station and ship detailing, and every temporal method
+reads the same MV field, which is why all of them ghosted.
+
+- **Change (BUILT, NOT FLOWN):** `slowPath` recognizes both decal pairs
+  (`overlayBbe`, `overlayUv`) as overlay draws, and the guard's active line
+  names the pair that fired (`exact BBE/DB3E` became `exact %s`).
+  `src/d3d11/engine_velocity.cpp`. The guard itself is unchanged: GEQUAL +
+  write-off state, base snapshot at PS t3, the base's depth written where the
+  base's record code is the decal's own; anything that does not qualify
+  declines and is counted, so an unqualified draw behaves exactly as before.
+- **Test:** lifecycle rig, new "VR 5B4D overlay lifecycle" case
+  (`tools/engine_velocity_test/lifecycle_tests.h`): the 5B4D/4375 pair in a
+  VR eye pass is guarded (private t3 bound on the draw, the game's t3 back at
+  the next draw, one base copy per group, summary `copies 3`, `guarded draws
+  4`, active line names 5B4D/4375), and the same pair with depth write on is
+  declined on state only (`declined state 1`, no shader/resource fallback).
+  Without the pair recognition the case fails: no private t3, no guarded
+  count, no active line.
+- **Flight discriminators** (the reporter's zip edvr-logs-20261026-204217,
+  attached to #133): before the build, the depth-writer map naming
+  vs_5B4D / ps_4375 draws as the last writer of stale-slot pixels; after it,
+  `engine motion: overlay guard: ... guarded draws N` rising with the active
+  line naming 5B4D/4375. The ghost trails on those pixels should stop. If they
+  do not, the detailing is not this pair; the next suspects are the refused
+  ps_BA58's draws and pixels the pool does not own at all (the 2026-09-27
+  window-band entry).
+- Not established here: which draws actually ghost in #133's session. No
+  flight log from that reporter is readable in this workspace; the zip on the
+  issue is the evidence to read first.
