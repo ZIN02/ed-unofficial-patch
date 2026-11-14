@@ -527,19 +527,6 @@ def expected_version(ref, root):
 
 def _describe(ref, root):
     import subprocess
-    # Only HEAD, a real ref (a branch or a tag) or a hash is described;
-    # anything else is taken literally, per expected_version's contract.
-    # git resolves a describe-style literal (`...-g<hash>`) to that commit,
-    # and on a clone with no tags -- a fork, a shallow CI checkout --
-    # `--always` then prints the bare hash, which version_matches cannot
-    # compare with the literal (it carries no `g`): every literal
-    # --expect-build then reported a mismatch there.
-    if ref not in ("HEAD", "", None) and not re.fullmatch(r"[0-9a-f]{4,40}", ref):
-        probe = subprocess.run(
-            ["git", "-C", root, "rev-parse", "--symbolic-full-name", "--verify", "--quiet", ref],
-            capture_output=True, text=True, timeout=10)
-        if probe.returncode != 0 or not probe.stdout.strip():
-            return ref
     try:
         out = subprocess.run(describe_cmd(ref, root), capture_output=True,
                              text=True, timeout=10)
@@ -26279,19 +26266,6 @@ def self_test():
         if version_matches(a, e) != want:
             print("version_matches(%r, %r) != %s" % (a, e, want))
             ok = False
-
-    # A describe-style literal is taken literally even when its -g<hash>
-    # resolves to a real commit in this repo (f78eba4 does): on a clone with
-    # no tags (a fork, a shallow CI checkout) `git describe --always` prints
-    # the bare hash, and every literal --expect-build mismatched there.
-    # HEAD, a branch, a tag and a hash still go through git describe.
-    literal = expected_version("0.14.1-93-gf78eba4", repo_root())
-    if literal != "0.14.1-93-gf78eba4":
-        print("expected_version sent a version literal to git: %r" % literal)
-        ok = False
-    if expected_version("HEAD", repo_root()) == "HEAD":
-        print("expected_version(HEAD) fell back to the literal; git did not answer")
-        ok = False
 
     tmp = tempfile.mkdtemp(prefix="edvr_log_test_")
     try:
