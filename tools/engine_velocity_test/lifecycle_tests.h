@@ -1599,6 +1599,70 @@ inline void run(const Harness& h) {
                     "VR overlay lifecycle: no guarded path fallback");
             h.check(lastLine("engine motion: flat overlay guard:", eyeMark).empty(), "VR overlay lifecycle: the VR profile's line is not the flat one");
         }
+        // 2026-11-12 (#133): the UV-only decal pair vs_5B4D / ps_4375 writes no depth and biases SV_Position.z exactly like vs_BBE5 / ps_DB3E, so the
+        // guard must cover it too -- left out, its draws kept stale slots on station and ship detailing (the camera term under motion, ghosting
+        // under every temporal AA). Same VR eye pass: guarded draw, private t3, game's t3 back at the next draw, one base copy per group, the active
+        // line names 5B4D/4375. A draw of the same pair with depth write ON is not guarded (declined state), only counted.
+        {
+            edvr::g_runtimeProfile = edvr::RuntimeProfile::Vr;
+            const auto dvsBlob = g.compile(std::string(shader_tests::kVsCommon) + shader_tests::kVsB, "vs_5_0");
+            const auto dpsBlob = g.compile(shader_tests::kPsB, "ps_5_0");
+            ComPtr<ID3D11VertexShader> decalVs;
+            ComPtr<ID3D11PixelShader> decalPs;
+            h.check(SUCCEEDED(g.dev->CreateVertexShader(dvsBlob->GetBufferPointer(), dvsBlob->GetBufferSize(), nullptr, &decalVs)) &&
+                    SUCCEEDED(g.dev->CreatePixelShader(dpsBlob->GetBufferPointer(), dpsBlob->GetBufferSize(), nullptr, &decalPs)),
+                    "VR 5B4D overlay lifecycle: original shaders created");
+            constexpr uint64_t decalVsHash = 0x5B4D8E894EEDA8B4ull;
+            constexpr uint64_t decalPsHash = 0x4375B72964F386CDull;
+            edvr::engineVelocityRememberVs(decalVs.Get(), decalVsHash, dvsBlob->GetBufferPointer(), dvsBlob->GetBufferSize(), false);
+            edvr::engineVelocityRememberPs(decalPs.Get(), decalPsHash, dpsBlob->GetBufferPointer(), dpsBlob->GetBufferSize(), false);
+            auto eyeDecal = [&](bool writeDepth) {
+                g.ctx->VSSetShader(decalVs.Get(), nullptr, 0); g.shadow(BindSlot::Vs, decalVs.Get(), decalVsHash);
+                g.setPs(decalPs.Get(), decalPsHash);
+                g.ctx->OMSetDepthStencilState(writeDepth ? g.depthState.Get() : overlayDepth.Get(), 5);
+                edvr::engineVelocityBeforeDraw(g.ctx, true);
+                h.check(edvr::engineVelocityDrawSubstituted(), "VR 5B4D overlay lifecycle: the decal draw into an eye produced MRT6");
+                ComPtr<ID3D11ShaderResourceView> bound;
+                g.ctx->PSGetShaderResources(3, 1, &bound);
+                if (writeDepth)
+                    h.check(!bound || bound.Get() == sentinel.Get(),
+                            "VR 5B4D overlay lifecycle: a depth-writing decal draw is not guarded (game t3 stays)");
+                else
+                    h.check(bound && bound.Get() != sentinel.Get(),
+                            "VR 5B4D overlay lifecycle: the guarded decal has the private snapshot at t3");
+                g.ctx->DrawInstanced(4, 1, 0, 0);
+            };
+            auto eyeDecalUnderlay = [&] {
+                g.setVs(); g.setPs(g.ps.Get(), kPsHash);
+                g.ctx->OMSetDepthStencilState(g.depthState.Get(), 0);
+                g.draw(5);
+                ComPtr<ID3D11ShaderResourceView> bound;
+                g.ctx->PSGetShaderResources(3, 1, &bound);
+                h.check(bound.Get() == sentinel.Get(), "VR 5B4D overlay lifecycle: the next draw gives the game's t3 back");
+            };
+            g.ordinaryFrame();   // the engine path is live from the first draw of the frames below
+            const size_t decalMark = g_log.size();
+            g.beginFrame(); g.writeScene(g.sceneA.Get(), g.rows[0]);
+            g.pass(0, 1, 5);
+            eyeDecal(false); eyeDecal(false);
+            eyeDecalUnderlay(); eyeDecal(false);
+            g.endFrame();
+            g.beginFrame(); g.writeScene(g.sceneA.Get(), g.rows[0]);
+            g.pass(0, 1, 5);
+            eyeDecal(false); eyeDecal(true);
+            g.endFrame(true);
+            const std::string decalSummary = lastLine("engine motion: overlay guard:", decalMark);
+            if (number(decalSummary, "copies ") != 3 || number(decalSummary, "guarded draws ") != 4) std::printf("  VR 5B4D overlay lifecycle: the summary line is: %s\n", decalSummary.c_str());
+            h.check(number(decalSummary, "copies ") == 3 && number(decalSummary, "guarded draws ") == 4,
+                    "VR 5B4D overlay lifecycle: one base copy per group in an eye pass, refreshed after another producer and next frame");
+            h.check(number(decalSummary, "declined state ") == 1 && number(decalSummary, "resource ") == 0 &&
+                    number(decalSummary, "shader ") == 0,
+                    "VR 5B4D overlay lifecycle: the depth-writing draw declined on state only; no shader/resource fallback");
+            const std::string active = lastLine("engine motion: overlay guard active at frame", decalMark);
+            h.check(active.find("5B4D/4375") != std::string::npos,
+                    "VR 5B4D overlay lifecycle: the active line names the 5B4D/4375 pair");
+            h.check(lastLine("engine motion: flat overlay guard:", decalMark).empty(), "VR 5B4D overlay lifecycle: the VR profile's line is not the flat one");
+        }
         edvr::g_runtimeProfile = edvr::RuntimeProfile::LegacyVr;
     }
     // The VR world route's two reads of the on-foot naming (vr_world_route.cpp, design doc section 82): whether a depth is the

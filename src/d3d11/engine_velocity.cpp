@@ -1834,11 +1834,17 @@ void slowPath(ID3D11DeviceContext* ctx, bool rtv0Eye) {
         sourcePass = depthRes.Get() == static_cast<ID3D11Resource*>(g_sourceDepth.Get());
         if (sourcePass) eye = kEngineVelocitySourceEye;
     }
-    // The overlay pair: decal-like draws of vs_BBE5 / ps_DB3E whose depth state tests GEQUAL and writes no depth, so their MRT6 write carries a depth
+    // The overlay pairs: decal-like draws whose depth state tests GEQUAL and writes no depth, so their MRT6 write carries a depth
     // (SV_Position.z less a per-material offset) that is not the scene's and the compose's exact test calls the base surface's pixel stale: no history,
-    // the camera term. Guarded in the flat profile's on-foot source pass since 2026-10; in the VR profile's eye passes since 2026-11-02 (the ship hull's
-    // stale-slot streaks: under motion the stale pixels' camera term is 18 to 200 px off the joined hull's, docs/kinematic-motion-injection-2026-09-19.md).
-    const bool overlayDraw = vsHash == 0xBBE58E40FE88EC80ull && psHash == 0xDB3E8D20CF53FBC0ull;
+    // the camera term. Both documented decal pairs are guarded: vs_BBE5 / ps_DB3E and the UV-only family vs_5B4D / ps_4375, which subtracts the same
+    // per-material offset from SV_Position.z and likewise writes no depth (docs/design-flat-temporal-aa-2026-09-23.md, "vs_5B4D has no guard at all").
+    // Guarded in the flat profile's on-foot source pass since 2026-10; in the VR profile's eye passes since 2026-11-02 (the ship hull's stale-slot
+    // streaks: under motion the stale pixels' camera term is 18 to 200 px off the joined hull's, docs/kinematic-motion-injection-2026-09-19.md).
+    // 2026-11-12 (#133): the 5B4D/4375 pair joins the guard; left out, it kept the same stale slots on station and ship detailing.
+    const bool overlayBbe = vsHash == 0xBBE58E40FE88EC80ull && psHash == 0xDB3E8D20CF53FBC0ull;
+    const bool overlayUv = vsHash == 0x5B4D8E894EEDA8B4ull && psHash == 0x4375B72964F386CDull;
+    const bool overlayDraw = overlayBbe || overlayUv;
+    const char* overlayPairName = overlayBbe ? "BBE/DB3E" : "5B4D/4375";
     const bool overlayPair = overlayDraw && ((sourcePass && runtimeFlatProfile()) || (eyePass && !runtimeFlatProfile()));
     // A different pool producer can change MRT6's substrate. Other scene
     // draws cannot write our private target; their depth writes remain guarded
@@ -2143,8 +2149,8 @@ void slowPath(ID3D11DeviceContext* ctx, bool rtv0Eye) {
                 g_guardVerified.game = gameSrv;
             }
             if (++g_draw.overlayGuardedDraws == 1)
-                Log::get().note("engine motion: %soverlay guard active at frame %u: exact BBE/DB3E, %ux%u base, "
-                                "private PS t3, original depth/stencil state retained.", runtimeFlatProfile() ? "flat " : "", frame, e.width, e.height);
+                Log::get().note("engine motion: %soverlay guard active at frame %u: exact %s, %ux%u base, "
+                                "private PS t3, original depth/stencil state retained.", runtimeFlatProfile() ? "flat " : "", frame, overlayPairName, e.width, e.height);
         }
     }
     if (psInstalled) ++g_draw.settersSkipped;
