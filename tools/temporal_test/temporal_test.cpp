@@ -798,6 +798,44 @@ int main() {
         check(edvr::temporalCantedWorldFromSelected(rendered[0][1],rendered[1][1],1,1,1,
               rawPrev,rawNow,true,false,W,tv)&&memcmp(W,legacyW,sizeof(W))==0&&
               memcmp(tv,legacyTv,sizeof(tv))==0,"chosen source eye retains exact legacy motion");
+        // The gate's last-good must be kept in the basis the frame USED: on a
+        // canted headset the pass re-bases an accepted delta to the treating
+        // eye after the gate stored the source eye's, and a later carry must
+        // replay the converted delta, not the conjugation the world was never
+        // reprojected with. The first refusal below is the unfixed sequence
+        // (carries the raw delta); temporalCameraGateStoreUsed is what the
+        // pass now calls, and the second refusal carries the converted one.
+        {
+            edvr::TemporalCameraGate g;
+            float Wc[9], tvc[3], mv2[3];
+            edvr::temporalWorldFromRows(rendered[0][1],rendered[1][1],Wc,tvc,mv2);
+            const auto own=edvr::temporalCameraGateStep(g,rendered[0][1],rendered[1][1],0.0,0.0f,Wc,tvc);
+            check(own.verdict==edvr::TemporalCameraVerdict::Own,"canted carry: the synthetic own turn is accepted");
+            float rawW[9],rawTv[3]; memcpy(rawW,Wc,sizeof(Wc)); memcpy(rawTv,tvc,sizeof(tvc));
+            float convW[9],convTv[3];
+            const bool conv=edvr::temporalCantedWorldFromSelected(rendered[0][1],rendered[1][1],1,1,0,
+                rawPrev,rawNow,true,false,convW,convTv);
+            check(conv&&!same9(convW,rawW),"canted carry: converting to the treating eye really changes the delta (20-degree cant)");
+            float W2[9],tv2[3];
+            const auto refused0=edvr::temporalCameraGateStep(g,rendered[0][1],rendered[1][1],0.0,90.0f,W2,tv2);
+            check(refused0.carried&&same9(W2,rawW),
+                  "unfixed sequence pinned: without the store a carry replays the raw source-eye delta");
+            edvr::temporalCameraGateStoreUsed(g,false,convW,convTv);
+            float W3[9],tv3[3];
+            const auto refused1=edvr::temporalCameraGateStep(g,rendered[0][1],rendered[1][1],0.0,90.0f,W3,tv3);
+            check(refused1.carried&&same9(W3,convW)&&memcmp(tv3,convTv,sizeof(tv3))==0,
+                  "with the store a carry replays the converted delta the frame used");
+            // A jump frame stores the used rotation but keeps the translation
+            // before the jump, mirroring the step's own rule.
+            edvr::TemporalCameraGate gj;
+            float Wj[9],tvj[3],mvj[3];
+            edvr::temporalWorldFromRows(rendered[0][1],rendered[1][1],Wj,tvj,mvj);
+            const auto ownJ=edvr::temporalCameraGateStep(gj,rendered[0][1],rendered[1][1],0.0,0.0f,Wj,tvj);
+            check(ownJ.verdict==edvr::TemporalCameraVerdict::Own,"canted carry jump: own turn accepted");
+            edvr::temporalCameraGateStoreUsed(gj,true,convW,convTv);
+            check(same9(gj.lastGoodC,convW)&&memcmp(gj.lastGoodTv,tvj,sizeof(tvj))==0,
+                  "a jump frame's store keeps the used rotation and the pre-jump translation");
+        }
         for(int i=0;i<9;++i)W[i]=100.0f+i;
         for(int i=0;i<3;++i)tv[i]=200.0f+i;
         float heldW[9],heldTv[3];memcpy(heldW,W,sizeof(W));memcpy(heldTv,tv,sizeof(tv));

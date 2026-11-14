@@ -254,7 +254,7 @@ static bool wiredLatch(const std::string& journal, const std::string& journalH) 
 static bool wiredFrameSequence(const std::string& temporal) {
     const size_t copied = temporal.find("std::memcpy(s->head,f->head,sizeof(s->head));");
     const size_t stored = found(copied) ? temporal.find("g_frameSequence.store(f->sequence,std::memory_order_release);", copied) : std::string::npos;
-    const size_t shifted = found(copied) ? temporal.find("edvr::lightGridCacheNoteJitter(s->frameCounter,jx,jy,s->shift);", copied) : std::string::npos;
+    const size_t shifted = found(copied) ? temporal.find("edvr::lightGridCacheNoteJitter(s->frameCounter,probeJx,probeJy,s->shift);", copied) : std::string::npos;
     size_t cleared = 0, at = 0;
     while (found(at = temporal.find("g_recommended.store(0,std::memory_order_release);g_frameSequence.store(0,std::memory_order_release);", at))) {
         ++cleared;
@@ -622,8 +622,10 @@ static void wiringCases() {
     check(!wiredAccessors(replaced(journal, "srv_turret::turretViewFromFlags(peek(g_v.flags))", "false"), temporal, journalH), "control: an accessor that answers false trips the pin");
     check(!wiredAccessors(journal, replaced(temporal, "g_frameSequence.store(f->sequence,std::memory_order_release);", ""), journalH), "control: a frame sequence that is never published trips the pin");
     check(!wiredAccessors(journal, replaced(replaced(temporal, "  g_frameSequence.store(f->sequence,std::memory_order_release);   // last: the head, eyes, frusta and shift above are this frame's\n", ""),
-                                            "  edvr::lightGridCacheNoteJitter(s->frameCounter,jx,jy,s->shift);", "  g_frameSequence.store(f->sequence,std::memory_order_release);\n  edvr::lightGridCacheNoteJitter(s->frameCounter,jx,jy,s->shift);"), journalH),
+                                            "  edvr::lightGridCacheNoteJitter(s->frameCounter,probeJx,probeJy,s->shift);", "  g_frameSequence.store(f->sequence,std::memory_order_release);\n  edvr::lightGridCacheNoteJitter(s->frameCounter,probeJx,probeJy,s->shift);"), journalH),
           "control: a frame sequence published before the shift is copied (a reader would see a half-built frame) trips the pin");
+    check(!wiredAccessors(journal, replaced(temporal, "edvr::lightGridCacheNoteJitter(s->frameCounter,probeJx,probeJy,s->shift);", "edvr::lightGridCacheNoteJitter(s->frameCounter,jx,jy,s->shift);"), journalH),
+          "control: the jitter probe noted with the loop's leftover eye-1 sample (jx, jy) instead of eye 0's trips the pin");
     check(!wiredAccessors(journal, replaced(temporal, "g_recommended.store(0,std::memory_order_release);g_frameSequence.store(0,std::memory_order_release);", "g_recommended.store(0,std::memory_order_release);"), journalH),
           "control: a frame sequence that survives an invalidate trips the pin");
     check(wiredKeys(ini, flatKeys), "edvr.ini: the ten keys in [experimental] with their ui: lines (no menu token) and the flown defaults; the flat profile's allow-list names none");

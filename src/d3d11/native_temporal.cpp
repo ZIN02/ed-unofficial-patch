@@ -472,14 +472,16 @@ HRESULT WINAPI begin(void* p,const EdvrNativeTemporalFrame* f,EdvrNativeTemporal
   }
   // A map open jitters only after a frame the pass kept (the camera followed the head); one it reset, or the first of the map, goes out unjittered.
   const bool mapJitterOk=!s->mapOpen||edvr::temporalMapStillBits().load(std::memory_order_relaxed)==3u;
+  float probeJx=0,probeJy=0;   // eye 0's sample: the loop leaves eye 1's in jx/jy
   if(s->currentSettings.on&&!s->standDown&&s->currentSettings.jitter&&mapJitterOk&&!edvr::vrWorldRouteOwnsNextFrame()) for(int e=0;e<2;++e) if(s->width[e]&&s->height[e]&&!s->flipped[e]) {
     edvr::temporalJitter(s->frameCounter,&jx,&jy,jitterCycleFor(*s,unsigned(e))); float dx=0,dy=0;
     edvr::temporalJitterToTangents(jx,jy,s->frusta[e],s->width[e],s->height[e],&dx,&dy);
     out->tangentShift[e][0]=dx;out->tangentShift[e][1]=dy;
     s->shift[e][0]=out->tangentShift[e][0];s->shift[e][1]=out->tangentShift[e][1];
+    if(e==0){probeJx=jx;probeJy=jy;}
   }
   if(s->shift[0][0]||s->shift[0][1]||s->shift[1][0]||s->shift[1][1])++s->jitterFrames;
-  edvr::lightGridCacheNoteJitter(s->frameCounter,jx,jy,s->shift);   // the grid cache's jitter probe reads this (log only)
+  edvr::lightGridCacheNoteJitter(s->frameCounter,probeJx,probeJy,s->shift);   // the grid cache's jitter probe reads this (log only)
   g_frameSequence.store(f->sequence,std::memory_order_release);   // last: the head, eyes, frusta and shift above are this frame's
   return S_OK;
 }
